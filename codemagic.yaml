@@ -1,0 +1,2193 @@
+workflows:
+  free-apk:
+    name: Free APK Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Debug Environment Variables
+        script: |
+          echo "*********** Free APK Build ***************"
+          echo "*********** App Name & Version ***********"
+          echo "APP_NAME: $APP_NAME"
+          echo "ORG_NAME: $ORG_NAME"
+          echo "WEB_URL: $WEB_URL"
+          echo "VERSION_NAME: $VERSION_NAME"           
+          echo "VERSION_CODE: $VERSION_CODE" 
+          echo "PKG_NAME: $PKG_NAME"
+          echo "BUNDLE_ID: $BUNDLE_ID"
+
+          echo "*********** App Customization Configuration ***********"
+          echo "Splash screen: $IS_SPLASH"
+          echo "Pull to refresh: $IS_PULLDOWN"
+          echo "Loading indicators: $IS_LOAD_IND"
+          echo "Bottom navigation bar: $IS_BOTTOMMENU"
+          echo "Deep linking: $IS_DEEPLINK"
+
+          echo "*********** Push Notification Configuration ***********"
+          echo "PUSH_NOTIFY: $PUSH_NOTIFY"
+
+          echo "*********** Android Keystore ***********"
+          echo "KEY_STORE: $KEY_STORE"
+          echo "CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD"
+          echo "CM_KEY_ALIAS: $CM_KEY_ALIAS"
+          echo "CM_KEY_PASSWORD: $CM_KEY_PASSWORD"
+
+          echo "*********** IOS Keystore ***********"
+          echo "APNS_KEY_ID: $APNS_KEY_ID"
+          echo "TEAM_ID: $APPLE_TEAM_ID"
+          echo "APNS_AUTH_KEY_URL: $APNS_AUTH_KEY_URL"
+
+          echo "*********** Firebase Android config file ***********"
+          echo "firebase_config_android: $firebase_config_android"
+
+          echo "*********** Firebase IOS config file ***********"
+          echo "firebase_config_ios: $firebase_config_ios"
+
+          echo "*********** Splash Configuration ***********"
+          echo "SPLASH: $SPLASH"
+          echo "SPLASH_BG:$SPLASH_BG"
+          echo "SPLASH_BG_COLOR: $SPLASH_BG_COLOR"
+          echo "SPLASH_TAGLINE: $SPLASH_TAGLINE"
+          echo "SPLASH_TAGLINE_COLOR: $SPLASH_TAGLINE_COLOR"
+          echo "SPLASH_ANIMATION: $SPLASH_ANIMATION"
+          echo "SPLASH_DURATION: $SPLASH_DURATION"
+                  
+          echo "*********** Bottom Navigation Configuration ***********"
+          echo "BOTTOMMENU_ITEMS: $BOTTOMMENU_ITEMS"
+          echo "BOTTOMMENU_BG_COLOR: $BOTTOMMENU_BG_COLOR"  
+          echo "BOTTOMMENU_ICON_COLOR: $BOTTOMMENU_ICON_COLOR"
+          echo "BOTTOMMENU_TEXT_COLOR: $BOTTOMMENU_TEXT_COLOR"
+          echo "BOTTOMMENU_ACTIVE_TAB_COLOR: $BOTTOMMENU_ACTIVE_TAB_COLOR"
+          echo "BOTTOMMENU_ICON_POSITION: $BOTTOMMENU_ICON_POSITION"
+          echo "BOTTOMMENU_VISIBLE_ON: $BOTTOMMENU_VISIBLE_ON"
+
+          echo "*********** Permissions ***********"
+          echo "IS_CAMERA: $IS_CAMERA"
+          echo "IS_LOCATION: $IS_LOCATION"
+          echo "IS_MIC: $IS_MIC"
+          echo "IS_NOTIFICATION: $IS_NOTIFICATION"
+          echo "IS_CONTACT: $IS_CONTACT"
+          echo "IS_BIOMETRIC: $IS_BIOMETRIC"
+          echo "IS_CALENDAR: $IS_CALENDAR"
+
+          echo "*********** Publish Configuration ***********"
+          echo "EMAIL_ID: $EMAIL_ID"
+
+      - name: Change Project Name
+        script: |
+          echo "App Name: $APP_NAME"
+          # Sanitize: lowercase, remove special characters, replace spaces with underscores
+          SANITIZED_NAME=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 ' | tr ' ' '_')
+
+          # Extract old name from pubspec.yaml
+          OLD_NAME_LINE=$(grep '^name: ' pubspec.yaml)
+          OLD_NAME=$(echo "$OLD_NAME_LINE" | cut -d ' ' -f2)
+
+          echo "🔁 Renaming project from '$OLD_NAME' to '$SANITIZED_NAME'..."
+
+          # Update pubspec.yaml
+          sed -i '' "s/^name: .*/name: $SANITIZED_NAME/" pubspec.yaml
+
+          # Update Dart imports
+          echo "🔄 Updating Dart package imports..."
+          grep -rl "package:$OLD_NAME" lib/ | xargs sed -i '' "s/package:$OLD_NAME/package:$SANITIZED_NAME/g"
+
+          # iOS: Update CFBundleName in Info.plist
+          echo "🛠️ Updating iOS CFBundleName..."
+          plutil -replace CFBundleName -string "$APP_NAME" ios/Runner/Info.plist
+
+          # Clean and get packages
+          flutter clean
+          flutter pub get
+
+          echo "✅ Project renamed to '$SANITIZED_NAME'"
+
+          echo "🚀 iOS CFBundleName set to '$APP_NAME'"
+
+      - name: Change app name
+        script: |
+          echo "🚀 Changing app name to: $APP_NAME"
+
+          flutter pub run rename setAppName --value "$APP_NAME"
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          echo "✅ App name changed and version set successfully"
+
+      - name: Get logo image from logoUrl
+        script: |
+          echo "🚀 Started: Downloading logo from $LOGO_URL"
+
+          mkdir -p assets/images/
+
+          # Try downloading with SSL certificate check first (silent test)
+          wget --spider --quiet "$LOGO_URL"
+          if [ $? -ne 0 ]; then
+            echo "⚠️ SSL verification failed. Retrying with --no-check-certificate..."
+            WGET_OPTS="--no-check-certificate"
+          else
+            WGET_OPTS=""
+          fi
+
+          # Attempt actual download
+          wget $WGET_OPTS -O assets/images/logo.png "$LOGO_URL"
+
+          # Check if the file was successfully downloaded
+          if [ ! -f assets/images/logo.png ]; then
+            echo "❌ Error: Failed to download logo from $LOGO_URL"
+            exit 1
+          fi
+
+          flutter pub get
+          echo "✅ Completed: Logo downloaded"
+
+      - name: Get splash screen image from splash image from Url
+        script: |
+          if [ "$IS_SPLASH" = "true" ]; then
+            echo "🚀 Started: Downloading splash assets"
+
+            mkdir -p assets/images/
+
+            # Download splash logo
+            echo "⬇️ Downloading splash logo from: $SPLASH"
+            wget -O assets/images/splash.png "$SPLASH"
+            if [ $? -ne 0 ]; then
+              echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+              wget --no-check-certificate -O assets/images/splash.png "$SPLASH"
+            fi
+
+            if [ ! -f assets/images/splash.png ]; then
+              echo "❌ Error: Failed to download SPLASH logo"
+              exit 1
+            fi
+
+            # Download splash background (optional)
+            if [ -n "$SPLASH_BG" ]; then
+              echo "⬇️ Downloading splash background from: $SPLASH_BG"
+              wget -O assets/images/splash_bg.png "$SPLASH_BG"
+              if [ $? -ne 0 ]; then
+                echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+                wget --no-check-certificate -O assets/images/splash_bg.png "$SPLASH_BG"
+              fi
+
+              if [ ! -f assets/images/splash_bg.png ]; then
+                echo "❌ Error: Failed to download SPLASH background"
+                exit 1
+              fi
+            else
+              echo "ℹ️ No SPLASH_BG provided, skipping background download"
+            fi
+
+            flutter pub get
+            echo "✅ Completed: Splash assets downloaded"
+          else
+            echo "⏭️ Skipping splash asset download (IS_SPLASH != true)"
+          fi
+
+      - name: Generate Launcher Icons
+        script: |
+          echo "🚀 Generating launcher icons"
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          # Use updated command (deprecates `:main`)
+          flutter pub run flutter_launcher_icons
+
+          echo "✅ Launcher icons generated successfully"
+
+      - name: Configure Android Plugin Namespaces
+        script: |
+          echo "🔧 Configuring Android plugin namespaces..."
+
+          # Create a temporary build.gradle file for uni_links
+          UNI_LINKS_GRADLE="/Users/builder/.pub-cache/hosted/pub.dev/uni_links-0.5.1/android/build.gradle"
+          if [ -f "$UNI_LINKS_GRADLE" ]; then
+            echo "android {" > temp_build.gradle
+            echo "    namespace 'name.avioli.unilinks'" >> temp_build.gradle
+            cat "$UNI_LINKS_GRADLE" >> temp_build.gradle
+            mv temp_build.gradle "$UNI_LINKS_GRADLE"
+            echo "✅ Updated uni_links namespace configuration"
+          fi
+
+      - name: Build Free APK
+        script: |
+          flutter build apk --debug \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+    artifacts:
+      - build/app/outputs/flutter-apk/app-debug.apk
+    publishing:
+      email:
+        recipients:
+          - $EMAIL_ID
+        notify:
+          success: true
+          failure: true
+
+  paid-apk:
+    name: Paid APK Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Debug Environment Variables
+        script: |
+          echo "*********** Paid APK Build ***************"
+          echo "*********** App Name & Version ***********"
+          echo "APP_NAME: $APP_NAME"
+          echo "ORG_NAME: $ORG_NAME"
+          echo "WEB_URL: $WEB_URL"
+          echo "VERSION_NAME: $VERSION_NAME"           
+          echo "VERSION_CODE: $VERSION_CODE" 
+          echo "PKG_NAME: $PKG_NAME"
+          echo "BUNDLE_ID: $BUNDLE_ID"
+
+          echo "*********** App Customization Configuration ***********"
+          echo "Splash screen: $IS_SPLASH"
+          echo "Pull to refresh: $IS_PULLDOWN"
+          echo "Loading indicators: $IS_LOAD_IND"
+          echo "Bottom navigation bar: $IS_BOTTOMMENU"
+          echo "Deep linking: $IS_DEEPLINK"
+
+          echo "*********** Push Notification Configuration ***********"
+          echo "PUSH_NOTIFY: $PUSH_NOTIFY"
+
+          echo "*********** Android Keystore ***********"
+          echo "KEY_STORE: $KEY_STORE"
+          echo "CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD"
+          echo "CM_KEY_ALIAS: $CM_KEY_ALIAS"
+          echo "CM_KEY_PASSWORD: $CM_KEY_PASSWORD"
+
+          echo "*********** IOS Keystore ***********"
+          echo "APNS_KEY_ID: $APNS_KEY_ID"
+          echo "TEAM_ID: $APPLE_TEAM_ID"
+          echo "APNS_AUTH_KEY_URL: $APNS_AUTH_KEY_URL"
+
+          echo "*********** Firebase Android config file ***********"
+          echo "firebase_config_android: $firebase_config_android"
+
+          echo "*********** Firebase IOS config file ***********"
+          echo "firebase_config_ios: $firebase_config_ios"
+
+          echo "*********** Splash Configuration ***********"
+          echo "SPLASH: $SPLASH"
+          echo "SPLASH_BG:$SPLASH_BG"
+          echo "SPLASH_BG_COLOR: $SPLASH_BG_COLOR"
+          echo "SPLASH_TAGLINE: $SPLASH_TAGLINE"
+          echo "SPLASH_TAGLINE_COLOR: $SPLASH_TAGLINE_COLOR"
+          echo "SPLASH_ANIMATION: $SPLASH_ANIMATION"
+          echo "SPLASH_DURATION: $SPLASH_DURATION"
+                  
+          echo "*********** Bottom Navigation Configuration ***********"
+          echo "BOTTOMMENU_ITEMS: $BOTTOMMENU_ITEMS"
+          echo "BOTTOMMENU_BG_COLOR: $BOTTOMMENU_BG_COLOR"  
+          echo "BOTTOMMENU_ICON_COLOR: $BOTTOMMENU_ICON_COLOR"
+          echo "BOTTOMMENU_TEXT_COLOR: $BOTTOMMENU_TEXT_COLOR"
+          echo "BOTTOMMENU_ACTIVE_TAB_COLOR: $BOTTOMMENU_ACTIVE_TAB_COLOR"
+          echo "BOTTOMMENU_ICON_POSITION: $BOTTOMMENU_ICON_POSITION"
+          echo "BOTTOMMENU_VISIBLE_ON: $BOTTOMMENU_VISIBLE_ON"
+
+          echo "*********** Permissions ***********"
+          echo "IS_CAMERA: $IS_CAMERA"
+          echo "IS_LOCATION: $IS_LOCATION"
+          echo "IS_MIC: $IS_MIC"
+          echo "IS_NOTIFICATION: $IS_NOTIFICATION"
+          echo "IS_CONTACT: $IS_CONTACT"
+          echo "IS_BIOMETRIC: $IS_BIOMETRIC"
+          echo "IS_CALENDAR: $IS_CALENDAR"
+
+          echo "*********** Publish Configuration ***********"
+          echo "EMAIL_ID: $EMAIL_ID"
+
+      - name: Change Project Name
+        script: |
+          echo "App Name: $APP_NAME"
+          # Sanitize: lowercase, remove special characters, replace spaces with underscores
+          SANITIZED_NAME=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 ' | tr ' ' '_')
+
+          # Extract old name from pubspec.yaml
+          OLD_NAME_LINE=$(grep '^name: ' pubspec.yaml)
+          OLD_NAME=$(echo "$OLD_NAME_LINE" | cut -d ' ' -f2)
+
+          echo "🔁 Renaming project from '$OLD_NAME' to '$SANITIZED_NAME'..."
+
+          # Update pubspec.yaml
+          sed -i '' "s/^name: .*/name: $SANITIZED_NAME/" pubspec.yaml
+
+          # Update Dart imports
+          echo "🔄 Updating Dart package imports..."
+          grep -rl "package:$OLD_NAME" lib/ | xargs sed -i '' "s/package:$OLD_NAME/package:$SANITIZED_NAME/g"
+
+          # iOS: Update CFBundleName in Info.plist
+          echo "🛠️ Updating iOS CFBundleName..."
+          plutil -replace CFBundleName -string "$APP_NAME" ios/Runner/Info.plist
+
+          # Clean and get packages
+          flutter clean
+          flutter pub get
+
+          echo "✅ Project renamed to '$SANITIZED_NAME'"
+
+          echo "🚀 iOS CFBundleName set to '$APP_NAME'"
+
+      - name: Change app name
+        script: |
+          echo "🚀 Changing app name to: $APP_NAME"
+
+          flutter pub run rename setAppName --value "$APP_NAME"
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          echo "✅ App name changed and version set successfully"
+
+      - name: Get logo image from logoUrl
+        script: |
+          echo "🚀 Started: Downloading logo from $LOGO_URL"
+
+          mkdir -p assets/images/
+
+          # Try downloading with SSL certificate check first (silent test)
+          wget --spider --quiet "$LOGO_URL"
+          if [ $? -ne 0 ]; then
+            echo "⚠️ SSL verification failed. Retrying with --no-check-certificate..."
+            WGET_OPTS="--no-check-certificate"
+          else
+            WGET_OPTS=""
+          fi
+
+          # Attempt actual download
+          wget $WGET_OPTS -O assets/images/logo.png "$LOGO_URL"
+
+          # Check if the file was successfully downloaded
+          if [ ! -f assets/images/logo.png ]; then
+            echo "❌ Error: Failed to download logo from $LOGO_URL"
+            exit 1
+          fi
+
+          flutter pub get
+          echo "✅ Completed: Logo downloaded"
+
+      - name: Get splash screen image from splash image from Url
+        script: |
+          if [ "$IS_SPLASH" = "true" ]; then
+            echo "🚀 Started: Downloading splash assets"
+
+            mkdir -p assets/images/
+
+            # Download splash logo
+            echo "⬇️ Downloading splash logo from: $SPLASH"
+            wget -O assets/images/splash.png "$SPLASH"
+            if [ $? -ne 0 ]; then
+              echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+              wget --no-check-certificate -O assets/images/splash.png "$SPLASH"
+            fi
+
+            if [ ! -f assets/images/splash.png ]; then
+              echo "❌ Error: Failed to download SPLASH logo"
+              exit 1
+            fi
+
+            # Download splash background (optional)
+            if [ -n "$SPLASH_BG" ]; then
+              echo "⬇️ Downloading splash background from: $SPLASH_BG"
+              wget -O assets/images/splash_bg.png "$SPLASH_BG"
+              if [ $? -ne 0 ]; then
+                echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+                wget --no-check-certificate -O assets/images/splash_bg.png "$SPLASH_BG"
+              fi
+
+              if [ ! -f assets/images/splash_bg.png ]; then
+                echo "❌ Error: Failed to download SPLASH background"
+                exit 1
+              fi
+            else
+              echo "ℹ️ No SPLASH_BG provided, skipping background download"
+            fi
+
+            flutter pub get
+            echo "✅ Completed: Splash assets downloaded"
+          else
+            echo "⏭️ Skipping splash asset download (IS_SPLASH != true)"
+          fi
+
+      - name: Generate Launcher Icons
+        script: |
+          echo "🚀 Generating launcher icons"
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          # Use updated command (deprecates `:main`)
+          flutter pub run flutter_launcher_icons
+
+          echo "✅ Launcher icons generated successfully"
+
+      - name: Configure Android Plugin Namespaces
+        script: |
+          echo "🔧 Configuring Android plugin namespaces..."
+
+          # Create a temporary build.gradle file for uni_links
+          UNI_LINKS_GRADLE="/Users/builder/.pub-cache/hosted/pub.dev/uni_links-0.5.1/android/build.gradle"
+          if [ -f "$UNI_LINKS_GRADLE" ]; then
+            echo "android {" > temp_build.gradle
+            echo "    namespace 'name.avioli.unilinks'" >> temp_build.gradle
+            cat "$UNI_LINKS_GRADLE" >> temp_build.gradle
+            mv temp_build.gradle "$UNI_LINKS_GRADLE"
+            echo "✅ Updated uni_links namespace configuration"
+          fi
+
+      - name: Build Paid APK
+        script: |
+          flutter build apk --release \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --obfuscate \
+            --split-debug-info=build/app/outputs/symbols \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/symbols/**
+    publishing:
+      email:
+        recipients:
+          - $EMAIL_ID
+        notify:
+          success: true
+          failure: true
+
+  release-apk-aab:
+    name: Release APK & AAB Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Debug Environment Variables
+        script: |
+          echo "*********** Release APK & AAB Build ***************"
+          echo "*********** App Name & Version ***********"
+          echo "APP_NAME: $APP_NAME"
+          echo "ORG_NAME: $ORG_NAME"
+          echo "WEB_URL: $WEB_URL"
+          echo "VERSION_NAME: $VERSION_NAME"           
+          echo "VERSION_CODE: $VERSION_CODE" 
+          echo "PKG_NAME: $PKG_NAME"
+          echo "BUNDLE_ID: $BUNDLE_ID"
+
+          echo "*********** App Customization Configuration ***********"
+          echo "Splash screen: $IS_SPLASH"
+          echo "Pull to refresh: $IS_PULLDOWN"
+          echo "Loading indicators: $IS_LOAD_IND"
+          echo "Bottom navigation bar: $IS_BOTTOMMENU"
+          echo "Deep linking: $IS_DEEPLINK"
+
+          echo "*********** Push Notification Configuration ***********"
+          echo "PUSH_NOTIFY: $PUSH_NOTIFY"
+
+          echo "*********** Android Keystore ***********"
+          echo "KEY_STORE: $KEY_STORE"
+          echo "CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD"
+          echo "CM_KEY_ALIAS: $CM_KEY_ALIAS"
+          echo "CM_KEY_PASSWORD: $CM_KEY_PASSWORD"
+
+          echo "*********** IOS Keystore ***********"
+          echo "APNS_KEY_ID: $APNS_KEY_ID"
+          echo "TEAM_ID: $APPLE_TEAM_ID"
+          echo "APNS_AUTH_KEY_URL: $APNS_AUTH_KEY_URL"
+
+          echo "*********** Firebase Android config file ***********"
+          echo "firebase_config_android: $firebase_config_android"
+
+          echo "*********** Firebase IOS config file ***********"
+          echo "firebase_config_ios: $firebase_config_ios"
+
+          echo "*********** Splash Configuration ***********"
+          echo "SPLASH: $SPLASH"
+          echo "SPLASH_BG:$SPLASH_BG"
+          echo "SPLASH_BG_COLOR: $SPLASH_BG_COLOR"
+          echo "SPLASH_TAGLINE: $SPLASH_TAGLINE"
+          echo "SPLASH_TAGLINE_COLOR: $SPLASH_TAGLINE_COLOR"
+          echo "SPLASH_ANIMATION: $SPLASH_ANIMATION"
+          echo "SPLASH_DURATION: $SPLASH_DURATION"
+                  
+          echo "*********** Bottom Navigation Configuration ***********"
+          echo "BOTTOMMENU_ITEMS: $BOTTOMMENU_ITEMS"
+          echo "BOTTOMMENU_BG_COLOR: $BOTTOMMENU_BG_COLOR"  
+          echo "BOTTOMMENU_ICON_COLOR: $BOTTOMMENU_ICON_COLOR"
+          echo "BOTTOMMENU_TEXT_COLOR: $BOTTOMMENU_TEXT_COLOR"
+          echo "BOTTOMMENU_ACTIVE_TAB_COLOR: $BOTTOMMENU_ACTIVE_TAB_COLOR"
+          echo "BOTTOMMENU_ICON_POSITION: $BOTTOMMENU_ICON_POSITION"
+          echo "BOTTOMMENU_VISIBLE_ON: $BOTTOMMENU_VISIBLE_ON"
+
+          echo "*********** Permissions ***********"
+          echo "IS_CAMERA: $IS_CAMERA"
+          echo "IS_LOCATION: $IS_LOCATION"
+          echo "IS_MIC: $IS_MIC"
+          echo "IS_NOTIFICATION: $IS_NOTIFICATION"
+          echo "IS_CONTACT: $IS_CONTACT"
+          echo "IS_BIOMETRIC: $IS_BIOMETRIC"
+          echo "IS_CALENDAR: $IS_CALENDAR"
+
+          echo "*********** Publish Configuration ***********"
+          echo "EMAIL_ID: $EMAIL_ID"
+
+      - name: Change Project Name
+        script: |
+          echo "App Name: $APP_NAME"
+          # Sanitize: lowercase, remove special characters, replace spaces with underscores
+          SANITIZED_NAME=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 ' | tr ' ' '_')
+
+          # Extract old name from pubspec.yaml
+          OLD_NAME_LINE=$(grep '^name: ' pubspec.yaml)
+          OLD_NAME=$(echo "$OLD_NAME_LINE" | cut -d ' ' -f2)
+
+          echo "🔁 Renaming project from '$OLD_NAME' to '$SANITIZED_NAME'..."
+
+          # Update pubspec.yaml
+          sed -i '' "s/^name: .*/name: $SANITIZED_NAME/" pubspec.yaml
+
+          # Update Dart imports
+          echo "🔄 Updating Dart package imports..."
+          grep -rl "package:$OLD_NAME" lib/ | xargs sed -i '' "s/package:$OLD_NAME/package:$SANITIZED_NAME/g"
+
+          # iOS: Update CFBundleName in Info.plist
+          echo "🛠️ Updating iOS CFBundleName..."
+          plutil -replace CFBundleName -string "$APP_NAME" ios/Runner/Info.plist
+
+          # Clean and get packages
+          flutter clean
+          flutter pub get
+
+          echo "✅ Project renamed to '$SANITIZED_NAME'"
+
+          echo "🚀 iOS CFBundleName set to '$APP_NAME'"
+
+      - name: Change app name
+        script: |
+          echo "🚀 Changing app name to: $APP_NAME"
+
+          flutter pub run rename setAppName --value "$APP_NAME"
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          echo "✅ App name changed and version set successfully"
+
+      - name: Get logo image from logoUrl
+        script: |
+          echo "🚀 Started: Downloading logo from $LOGO_URL"
+
+          mkdir -p assets/images/
+
+          # Try downloading with SSL certificate check first (silent test)
+          wget --spider --quiet "$LOGO_URL"
+          if [ $? -ne 0 ]; then
+            echo "⚠️ SSL verification failed. Retrying with --no-check-certificate..."
+            WGET_OPTS="--no-check-certificate"
+          else
+            WGET_OPTS=""
+          fi
+
+          # Attempt actual download
+          wget $WGET_OPTS -O assets/images/logo.png "$LOGO_URL"
+
+          # Check if the file was successfully downloaded
+          if [ ! -f assets/images/logo.png ]; then
+            echo "❌ Error: Failed to download logo from $LOGO_URL"
+            exit 1
+          fi
+
+          flutter pub get
+          echo "✅ Completed: Logo downloaded"
+
+      - name: Get splash screen image from splash image from Url
+        script: |
+          if [ "$IS_SPLASH" = "true" ]; then
+            echo "🚀 Started: Downloading splash assets"
+
+            mkdir -p assets/images/
+
+            # Download splash logo
+            echo "⬇️ Downloading splash logo from: $SPLASH"
+            wget -O assets/images/splash.png "$SPLASH"
+            if [ $? -ne 0 ]; then
+              echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+              wget --no-check-certificate -O assets/images/splash.png "$SPLASH"
+            fi
+
+            if [ ! -f assets/images/splash.png ]; then
+              echo "❌ Error: Failed to download SPLASH logo"
+              exit 1
+            fi
+
+            # Download splash background (optional)
+            if [ -n "$SPLASH_BG" ]; then
+              echo "⬇️ Downloading splash background from: $SPLASH_BG"
+              wget -O assets/images/splash_bg.png "$SPLASH_BG"
+              if [ $? -ne 0 ]; then
+                echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+                wget --no-check-certificate -O assets/images/splash_bg.png "$SPLASH_BG"
+              fi
+
+              if [ ! -f assets/images/splash_bg.png ]; then
+                echo "❌ Error: Failed to download SPLASH background"
+                exit 1
+              fi
+            else
+              echo "ℹ️ No SPLASH_BG provided, skipping background download"
+            fi
+
+            flutter pub get
+            echo "✅ Completed: Splash assets downloaded"
+          else
+            echo "⏭️ Skipping splash asset download (IS_SPLASH != true)"
+          fi
+
+      - name: Generate Launcher Icons
+        script: |
+          echo "🚀 Generating launcher icons"
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          # Use updated command (deprecates `:main`)
+          flutter pub run flutter_launcher_icons
+
+          echo "✅ Launcher icons generated successfully"
+
+      - name: Configure Android Plugin Namespaces
+        script: |
+          echo "🔧 Configuring Android plugin namespaces..."
+
+          # Create a temporary build.gradle file for uni_links
+          UNI_LINKS_GRADLE="/Users/builder/.pub-cache/hosted/pub.dev/uni_links-0.5.1/android/build.gradle"
+          if [ -f "$UNI_LINKS_GRADLE" ]; then
+            echo "android {" > temp_build.gradle
+            echo "    namespace 'name.avioli.unilinks'" >> temp_build.gradle
+            cat "$UNI_LINKS_GRADLE" >> temp_build.gradle
+            mv temp_build.gradle "$UNI_LINKS_GRADLE"
+            echo "✅ Updated uni_links namespace configuration"
+          fi
+
+      - name: Download Firebase Configuration
+        script: |
+          if [ "$PUSH_NOTIFY" = "true" ]; then
+            # Download Android config
+            if [ -n "$firebase_config_android" ]; then
+              echo "⬇️ Downloading Firebase Android config"
+              curl -o android/app/google-services.json "$firebase_config_android"
+            fi
+            
+            # Download iOS config
+            if [ -n "$firebase_config_ios" ]; then
+              echo "⬇️ Downloading Firebase iOS config"
+              curl -o ios/Runner/GoogleService-Info.plist "$firebase_config_ios"
+            fi
+          fi
+
+      - name: Setup Android Signing
+        script: |
+          if [ -n "$KEY_STORE" ]; then
+            echo "⬇️ Downloading Android keystore"
+            curl -o android/app/keystore.jks "$KEY_STORE"
+            
+            # Create key.properties
+            echo "storePassword=$CM_KEYSTORE_PASSWORD" > android/key.properties
+            echo "keyPassword=$CM_KEY_PASSWORD" >> android/key.properties
+            echo "keyAlias=$CM_KEY_ALIAS" >> android/key.properties
+            echo "storeFile=keystore.jks" >> android/key.properties
+          fi
+
+      - name: Build Release APK and AAB
+        script: |
+          flutter build apk --release \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+
+          flutter build appbundle --release \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/bundle/release/app-release.aab
+    publishing:
+      email:
+        recipients:
+          - $EMAIL_ID
+        notify:
+          success: true
+          failure: true
+
+  release-ipa:
+    name: Release IPA Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      vars:
+        XCODE_WORKSPACE: "Runner.xcworkspace"
+        XCODE_SCHEME: "Runner"
+        LANG: en_US.UTF-8
+        LC_ALL: en_US.UTF-8
+    scripts:
+      - name: Debug Environment Variables
+        script: |
+          echo "*********** Release IPA Build ***************"
+          echo "*********** App Name & Version ***********"
+          echo "APP_NAME: $APP_NAME"
+          echo "ORG_NAME: $ORG_NAME"
+          echo "WEB_URL: $WEB_URL"
+          echo "VERSION_NAME: $VERSION_NAME"           
+          echo "VERSION_CODE: $VERSION_CODE" 
+          echo "PKG_NAME: $PKG_NAME"
+          echo "BUNDLE_ID: $BUNDLE_ID"
+
+          echo "*********** App Customization Configuration ***********"
+          echo "Splash screen: $IS_SPLASH"
+          echo "Pull to refresh: $IS_PULLDOWN"
+          echo "Loading indicators: $IS_LOAD_IND"
+          echo "Bottom navigation bar: $IS_BOTTOMMENU"
+          echo "Deep linking: $IS_DEEPLINK"
+
+          echo "*********** Push Notification Configuration ***********"
+          echo "PUSH_NOTIFY: $PUSH_NOTIFY"
+
+          echo "*********** Android Keystore ***********"
+          echo "KEY_STORE: $KEY_STORE"
+          echo "CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD"
+          echo "CM_KEY_ALIAS: $CM_KEY_ALIAS"
+          echo "CM_KEY_PASSWORD: $CM_KEY_PASSWORD"
+
+          echo "*********** IOS Keystore ***********"
+          echo "APNS_KEY_ID: $APNS_KEY_ID"
+          echo "TEAM_ID: $APPLE_TEAM_ID"
+          echo "APNS_AUTH_KEY_URL: $APNS_AUTH_KEY_URL"
+
+          echo "*********** Firebase Android config file ***********"
+          echo "firebase_config_android: $firebase_config_android"
+
+          echo "*********** Firebase IOS config file ***********"
+          echo "firebase_config_ios: $firebase_config_ios"
+
+          echo "*********** Splash Configuration ***********"
+          echo "SPLASH: $SPLASH"
+          echo "SPLASH_BG:$SPLASH_BG"
+          echo "SPLASH_BG_COLOR: $SPLASH_BG_COLOR"
+          echo "SPLASH_TAGLINE: $SPLASH_TAGLINE"
+          echo "SPLASH_TAGLINE_COLOR: $SPLASH_TAGLINE_COLOR"
+          echo "SPLASH_ANIMATION: $SPLASH_ANIMATION"
+          echo "SPLASH_DURATION: $SPLASH_DURATION"
+                  
+          echo "*********** Bottom Navigation Configuration ***********"
+          echo "BOTTOMMENU_ITEMS: $BOTTOMMENU_ITEMS"
+          echo "BOTTOMMENU_BG_COLOR: $BOTTOMMENU_BG_COLOR"  
+          echo "BOTTOMMENU_ICON_COLOR: $BOTTOMMENU_ICON_COLOR"
+          echo "BOTTOMMENU_TEXT_COLOR: $BOTTOMMENU_TEXT_COLOR"
+          echo "BOTTOMMENU_ACTIVE_TAB_COLOR: $BOTTOMMENU_ACTIVE_TAB_COLOR"
+          echo "BOTTOMMENU_ICON_POSITION: $BOTTOMMENU_ICON_POSITION"
+          echo "BOTTOMMENU_VISIBLE_ON: $BOTTOMMENU_VISIBLE_ON"
+
+          echo "*********** Permissions ***********"
+          echo "IS_CAMERA: $IS_CAMERA"
+          echo "IS_LOCATION: $IS_LOCATION"
+          echo "IS_MIC: $IS_MIC"
+          echo "IS_NOTIFICATION: $IS_NOTIFICATION"
+          echo "IS_CONTACT: $IS_CONTACT"
+          echo "IS_BIOMETRIC: $IS_BIOMETRIC"
+          echo "IS_CALENDAR: $IS_CALENDAR"
+
+          echo "*********** Publish Configuration ***********"
+          echo "EMAIL_ID: $EMAIL_ID"
+
+      - name: Change Project Name
+        script: |
+          echo "App Name: $APP_NAME"
+          # Sanitize: lowercase, remove special characters, replace spaces with underscores
+          SANITIZED_NAME=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 ' | tr ' ' '_')
+
+          # Extract old name from pubspec.yaml
+          OLD_NAME_LINE=$(grep '^name: ' pubspec.yaml)
+          OLD_NAME=$(echo "$OLD_NAME_LINE" | cut -d ' ' -f2)
+
+          echo "🔁 Renaming project from '$OLD_NAME' to '$SANITIZED_NAME'..."
+
+          # Update pubspec.yaml
+          sed -i '' "s/^name: .*/name: $SANITIZED_NAME/" pubspec.yaml
+
+          # Update Dart imports
+          echo "🔄 Updating Dart package imports..."
+          grep -rl "package:$OLD_NAME" lib/ | xargs sed -i '' "s/package:$OLD_NAME/package:$SANITIZED_NAME/g"
+
+          # iOS: Update CFBundleName in Info.plist
+          echo "🛠️ Updating iOS CFBundleName..."
+          plutil -replace CFBundleName -string "$APP_NAME" ios/Runner/Info.plist
+
+          # Clean and get packages
+          flutter clean
+          flutter pub get
+
+          echo "✅ Project renamed to '$SANITIZED_NAME'"
+
+          echo "🚀 iOS CFBundleName set to '$APP_NAME'"
+
+      - name: Change app name
+        script: |
+          echo "🚀 Changing app name to: $APP_NAME"
+
+          flutter pub run rename setAppName --value "$APP_NAME"
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          echo "✅ App name changed and version set successfully"
+
+      - name: Get logo image from logoUrl
+        script: |
+          echo "🚀 Started: Downloading logo from $LOGO_URL"
+
+          mkdir -p assets/images/
+
+          # Try downloading with SSL certificate check first (silent test)
+          wget --spider --quiet "$LOGO_URL"
+          if [ $? -ne 0 ]; then
+            echo "⚠️ SSL verification failed. Retrying with --no-check-certificate..."
+            WGET_OPTS="--no-check-certificate"
+          else
+            WGET_OPTS=""
+          fi
+
+          # Attempt actual download
+          wget $WGET_OPTS -O assets/images/logo.png "$LOGO_URL"
+
+          # Check if the file was successfully downloaded
+          if [ ! -f assets/images/logo.png ]; then
+            echo "❌ Error: Failed to download logo from $LOGO_URL"
+            exit 1
+          fi
+
+          flutter pub get
+          echo "✅ Completed: Logo downloaded"
+
+      - name: Get splash screen image from splash image from Url
+        script: |
+          if [ "$IS_SPLASH" = "true" ]; then
+            echo "🚀 Started: Downloading splash assets"
+
+            mkdir -p assets/images/
+
+            # Download splash logo
+            echo "⬇️ Downloading splash logo from: $SPLASH"
+            wget -O assets/images/splash.png "$SPLASH"
+            if [ $? -ne 0 ]; then
+              echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+              wget --no-check-certificate -O assets/images/splash.png "$SPLASH"
+            fi
+
+            if [ ! -f assets/images/splash.png ]; then
+              echo "❌ Error: Failed to download SPLASH logo"
+              exit 1
+            fi
+
+            # Download splash background (optional)
+            if [ -n "$SPLASH_BG" ]; then
+              echo "⬇️ Downloading splash background from: $SPLASH_BG"
+              wget -O assets/images/splash_bg.png "$SPLASH_BG"
+              if [ $? -ne 0 ]; then
+                echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+                wget --no-check-certificate -O assets/images/splash_bg.png "$SPLASH_BG"
+              fi
+
+              if [ ! -f assets/images/splash_bg.png ]; then
+                echo "❌ Error: Failed to download SPLASH background"
+                exit 1
+              fi
+            else
+              echo "ℹ️ No SPLASH_BG provided, skipping background download"
+            fi
+
+            flutter pub get
+            echo "✅ Completed: Splash assets downloaded"
+          else
+            echo "⏭️ Skipping splash asset download (IS_SPLASH != true)"
+          fi
+
+      - name: Generate Launcher Icons
+        script: |
+          echo "🚀 Generating launcher icons"
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          # Use updated command (deprecates `:main`)
+          flutter pub run flutter_launcher_icons
+
+          echo "✅ Launcher icons generated successfully"
+
+      - name: Setup iOS Firebase Push Notifications
+        script: |
+          if [ "$PUSH_NOTIFY" = "true" ]; then
+            # Download iOS Firebase config
+            if [ -n "$firebase_config_ios" ]; then
+              echo "⬇️ Downloading Firebase iOS config"
+              curl -o ios/Runner/GoogleService-Info.plist "$firebase_config_ios"
+            fi
+
+            # Setup APNS authentication
+            if [ -n "$APNS_KEY_ID" ] && [ -n "$APPLE_TEAM_ID" ] && [ -n "$APNS_AUTH_KEY_URL" ]; then
+              echo "⬇️ Downloading APNS auth key"
+              mkdir -p ios/keys
+              curl -o ios/keys/AuthKey_$APNS_KEY_ID.p8 "$APNS_AUTH_KEY_URL"
+            fi
+          fi
+
+      - name: Setup iOS Manual Signing
+        script: |
+          if [ -n "$CERT_URL" ] && [ -n "$PROFILE_URL" ]; then
+            echo "⬇️ Downloading iOS certificates and provisioning profiles"
+            curl -o ios/certs.p12 "$CERT_URL"
+            curl -o ios/profile.mobileprovision "$PROFILE_URL"
+            
+            # Setup iOS certificates
+            keychain initialize
+            keychain add-certificates \
+              --certificate ios/certs.p12 \
+              --certificate-password "$CERT_PASSWORD"
+              
+            # Install provisioning profile
+            mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+            cp ios/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          fi
+
+      - name: Build IPA
+        script: |
+          flutter build ios --release \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --no-codesign \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      email:
+        recipients:
+          - $EMAIL_ID
+        notify:
+          success: true
+          failure: true
+
+  release-all:
+    name: Combined Release Build
+    max_build_duration: 120
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Debug Environment Variables
+        script: |
+          echo "*********** Release APK & AAB & IPA Build ***************"
+          echo "*********** App Name & Version ***********"
+          echo "APP_NAME: $APP_NAME"
+          echo "ORG_NAME: $ORG_NAME"
+          echo "WEB_URL: $WEB_URL"
+          echo "VERSION_NAME: $VERSION_NAME"           
+          echo "VERSION_CODE: $VERSION_CODE" 
+          echo "PKG_NAME: $PKG_NAME"
+          echo "BUNDLE_ID: $BUNDLE_ID"
+
+          echo "*********** App Customization Configuration ***********"
+          echo "Splash screen: $IS_SPLASH"
+          echo "Pull to refresh: $IS_PULLDOWN"
+          echo "Loading indicators: $IS_LOAD_IND"
+          echo "Bottom navigation bar: $IS_BOTTOMMENU"
+          echo "Deep linking: $IS_DEEPLINK"
+
+          echo "*********** Push Notification Configuration ***********"
+          echo "PUSH_NOTIFY: $PUSH_NOTIFY"
+
+          echo "*********** Android Keystore ***********"
+          echo "KEY_STORE: $KEY_STORE"
+          echo "CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD"
+          echo "CM_KEY_ALIAS: $CM_KEY_ALIAS"
+          echo "CM_KEY_PASSWORD: $CM_KEY_PASSWORD"
+
+          echo "*********** IOS Keystore ***********"
+          echo "APNS_KEY_ID: $APNS_KEY_ID"
+          echo "TEAM_ID: $APPLE_TEAM_ID"
+          echo "APNS_AUTH_KEY_URL: $APNS_AUTH_KEY_URL"
+
+          echo "*********** Firebase Android config file ***********"
+          echo "firebase_config_android: $firebase_config_android"
+
+          echo "*********** Firebase IOS config file ***********"
+          echo "firebase_config_ios: $firebase_config_ios"
+
+          echo "*********** Splash Configuration ***********"
+          echo "SPLASH: $SPLASH"
+          echo "SPLASH_BG:$SPLASH_BG"
+          echo "SPLASH_BG_COLOR: $SPLASH_BG_COLOR"
+          echo "SPLASH_TAGLINE: $SPLASH_TAGLINE"
+          echo "SPLASH_TAGLINE_COLOR: $SPLASH_TAGLINE_COLOR"
+          echo "SPLASH_ANIMATION: $SPLASH_ANIMATION"
+          echo "SPLASH_DURATION: $SPLASH_DURATION"
+                  
+          echo "*********** Bottom Navigation Configuration ***********"
+          echo "BOTTOMMENU_ITEMS: $BOTTOMMENU_ITEMS"
+          echo "BOTTOMMENU_BG_COLOR: $BOTTOMMENU_BG_COLOR"  
+          echo "BOTTOMMENU_ICON_COLOR: $BOTTOMMENU_ICON_COLOR"
+          echo "BOTTOMMENU_TEXT_COLOR: $BOTTOMMENU_TEXT_COLOR"
+          echo "BOTTOMMENU_ACTIVE_TAB_COLOR: $BOTTOMMENU_ACTIVE_TAB_COLOR"
+          echo "BOTTOMMENU_ICON_POSITION: $BOTTOMMENU_ICON_POSITION"
+          echo "BOTTOMMENU_VISIBLE_ON: $BOTTOMMENU_VISIBLE_ON"
+
+          echo "*********** Permissions ***********"
+          echo "IS_CAMERA: $IS_CAMERA"
+          echo "IS_LOCATION: $IS_LOCATION"
+          echo "IS_MIC: $IS_MIC"
+          echo "IS_NOTIFICATION: $IS_NOTIFICATION"
+          echo "IS_CONTACT: $IS_CONTACT"
+          echo "IS_BIOMETRIC: $IS_BIOMETRIC"
+          echo "IS_CALENDAR: $IS_CALENDAR"
+
+          echo "*********** Publish Configuration ***********"
+          echo "EMAIL_ID: $EMAIL_ID"
+
+      - name: Change Project Name
+        script: |
+          echo "App Name: $APP_NAME"
+          # Sanitize: lowercase, remove special characters, replace spaces with underscores
+          SANITIZED_NAME=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 ' | tr ' ' '_')
+
+          # Extract old name from pubspec.yaml
+          OLD_NAME_LINE=$(grep '^name: ' pubspec.yaml)
+          OLD_NAME=$(echo "$OLD_NAME_LINE" | cut -d ' ' -f2)
+
+          echo "🔁 Renaming project from '$OLD_NAME' to '$SANITIZED_NAME'..."
+
+          # Update pubspec.yaml
+          sed -i '' "s/^name: .*/name: $SANITIZED_NAME/" pubspec.yaml
+
+          # Update Dart imports
+          echo "🔄 Updating Dart package imports..."
+          grep -rl "package:$OLD_NAME" lib/ | xargs sed -i '' "s/package:$OLD_NAME/package:$SANITIZED_NAME/g"
+
+          # iOS: Update CFBundleName in Info.plist
+          echo "🛠️ Updating iOS CFBundleName..."
+          plutil -replace CFBundleName -string "$APP_NAME" ios/Runner/Info.plist
+
+          # Clean and get packages
+          flutter clean
+          flutter pub get
+
+          echo "✅ Project renamed to '$SANITIZED_NAME'"
+
+          echo "🚀 iOS CFBundleName set to '$APP_NAME'"
+
+      - name: Change app name
+        script: |
+          echo "🚀 Changing app name to: $APP_NAME"
+
+          flutter pub run rename setAppName --value "$APP_NAME"
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          echo "✅ App name changed and version set successfully"
+
+      - name: Get logo image from logoUrl
+        script: |
+          echo "🚀 Started: Downloading logo from $LOGO_URL"
+
+          mkdir -p assets/images/
+
+          # Try downloading with SSL certificate check first (silent test)
+          wget --spider --quiet "$LOGO_URL"
+          if [ $? -ne 0 ]; then
+            echo "⚠️ SSL verification failed. Retrying with --no-check-certificate..."
+            WGET_OPTS="--no-check-certificate"
+          else
+            WGET_OPTS=""
+          fi
+
+          # Attempt actual download
+          wget $WGET_OPTS -O assets/images/logo.png "$LOGO_URL"
+
+          # Check if the file was successfully downloaded
+          if [ ! -f assets/images/logo.png ]; then
+            echo "❌ Error: Failed to download logo from $LOGO_URL"
+            exit 1
+          fi
+
+          flutter pub get
+          echo "✅ Completed: Logo downloaded"
+
+      - name: Get splash screen image from splash image from Url
+        script: |
+          if [ "$IS_SPLASH" = "true" ]; then
+            echo "🚀 Started: Downloading splash assets"
+
+            mkdir -p assets/images/
+
+            # Download splash logo
+            echo "⬇️ Downloading splash logo from: $SPLASH"
+            wget -O assets/images/splash.png "$SPLASH"
+            if [ $? -ne 0 ]; then
+              echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+              wget --no-check-certificate -O assets/images/splash.png "$SPLASH"
+            fi
+
+            if [ ! -f assets/images/splash.png ]; then
+              echo "❌ Error: Failed to download SPLASH logo"
+              exit 1
+            fi
+
+            # Download splash background (optional)
+            if [ -n "$SPLASH_BG" ]; then
+              echo "⬇️ Downloading splash background from: $SPLASH_BG"
+              wget -O assets/images/splash_bg.png "$SPLASH_BG"
+              if [ $? -ne 0 ]; then
+                echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+                wget --no-check-certificate -O assets/images/splash_bg.png "$SPLASH_BG"
+              fi
+
+              if [ ! -f assets/images/splash_bg.png ]; then
+                echo "❌ Error: Failed to download SPLASH background"
+                exit 1
+              fi
+            else
+              echo "ℹ️ No SPLASH_BG provided, skipping background download"
+            fi
+
+            flutter pub get
+            echo "✅ Completed: Splash assets downloaded"
+          else
+            echo "⏭️ Skipping splash asset download (IS_SPLASH != true)"
+          fi
+
+      - name: Generate Launcher Icons
+        script: |
+          echo "🚀 Generating launcher icons"
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+          # Default values
+          VERSION_NAME="${VERSION_NAME:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-100}"
+
+          # Check if VERSION_NAME is empty or not set
+          if [ -z "$VERSION_NAME" ]; then
+            VERSION_NAME=$DEFAULT_VERSION_NAME
+            echo "🔢 Setting DEFAULT_VERSION_NAME"
+          fi
+
+          # Check if VERSION_CODE is empty or not set
+          if [ -z "$VERSION_CODE" ]; then
+            VERSION_CODE=$DEFAULT_VERSION_CODE
+            echo "🔢 Setting DEFAULT_VERSION_CODE"
+          fi
+
+          echo "🔢 VERSION_NAME: $VERSION_NAME"
+          echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+          echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+          # Replace or add version line in pubspec.yaml
+          if grep -q "^version: " pubspec.yaml; then
+            sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+          else
+            echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+          fi
+
+          flutter pub get
+
+          # Use updated command (deprecates `:main`)
+          flutter pub run flutter_launcher_icons
+
+          echo "✅ Launcher icons generated successfully"
+
+      - name: Download Firebase Configuration
+        script: |
+          if [ "$PUSH_NOTIFY" = "true" ]; then
+            # Download Android config
+            if [ -n "$firebase_config_android" ]; then
+              echo "⬇️ Downloading Firebase Android config"
+              curl -o android/app/google-services.json "$firebase_config_android"
+            fi
+            
+            # Download iOS config
+            if [ -n "$firebase_config_ios" ]; then
+              echo "⬇️ Downloading Firebase iOS config"
+              curl -o ios/Runner/GoogleService-Info.plist "$firebase_config_ios"
+            fi
+          fi
+
+      - name: Setup Android Signing
+        script: |
+          if [ -n "$KEY_STORE" ]; then
+            echo "⬇️ Downloading Android keystore"
+            curl -o android/app/keystore.jks "$KEY_STORE"
+            
+            # Create key.properties
+            echo "storePassword=$CM_KEYSTORE_PASSWORD" > android/key.properties
+            echo "keyPassword=$CM_KEY_PASSWORD" >> android/key.properties
+            echo "keyAlias=$CM_KEY_ALIAS" >> android/key.properties
+            echo "storeFile=keystore.jks" >> android/key.properties
+          fi
+
+      - name: Setup iOS Signing
+        script: |
+          if [ -n "$CERT_URL" ] && [ -n "$PROFILE_URL" ]; then
+            echo "⬇️ Downloading iOS certificates and provisioning profiles"
+            curl -o ios/certs.p12 "$CERT_URL"
+            curl -o ios/profile.mobileprovision "$PROFILE_URL"
+            
+            # Setup iOS certificates
+            keychain initialize
+            keychain add-certificates \
+              --certificate ios/certs.p12 \
+              --certificate-password "$CERT_PASSWORD"
+              
+            # Install provisioning profile
+            mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+            cp ios/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+          fi
+
+      - name: Build All Formats
+        script: |
+          # Build Android APK and AAB
+          flutter build apk --release \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+
+          flutter build appbundle --release \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+
+          # Build iOS IPA
+          flutter build ios --release \
+            --build-name=$VERSION_NAME \
+            --build-number=$VERSION_CODE \
+            --no-codesign \
+            --dart-define=WEB_URL="$WEB_URL" \
+            --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+            --dart-define=PKG_NAME="$PKG_NAME" \
+            --dart-define=APP_NAME="$APP_NAME" \
+            --dart-define=ORG_NAME="$ORG_NAME" \
+            --dart-define=IS_SPLASH="$IS_SPLASH" \
+            --dart-define=SPLASH="$SPLASH" \
+            --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+            --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+            --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+            --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+            --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+            --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+            --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+            --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+            --dart-define=BOTTOMMENU_BG_COLOR="$BOTTOMMENU_BG_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_COLOR="$BOTTOMMENU_ICON_COLOR" \
+            --dart-define=BOTTOMMENU_TEXT_COLOR="$BOTTOMMENU_TEXT_COLOR" \
+            --dart-define=BOTTOMMENU_ACTIVE_TAB_COLOR="$BOTTOMMENU_ACTIVE_TAB_COLOR" \
+            --dart-define=BOTTOMMENU_ICON_POSITION="$BOTTOMMENU_ICON_POSITION" \
+            --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+            --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/bundle/release/app-release.aab
+      - build/ios/ipa/*.ipa
+    publishing:
+      email:
+        recipients:
+          - $EMAIL_ID
+        notify:
+          success: true
+          failure: true
+
+environment:
+  app_details:
+    vars:
+      VERSION_NAME: $VERSION_NAME
+      VERSION_CODE: $VERSION_CODE
+      KEY_STORE: $KEY_STORE
+      CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD
+      CM_KEY_ALIAS: $CM_KEY_ALIAS
+      CM_KEY_PASSWORD: $CM_KEY_PASSWORD
+      APP_NAME: $APP_NAME
+      ORG_NAME: $ORG_NAME
+      IS_SPLASH: $IS_SPLASH
+      SPLASH: $SPLASH
+      SPLASH_BG: $SPLASH_BG
+      SPLASH_BG_COLOR: $SPLASH_BG_COLOR
+      SPLASH_TAGLINE: $SPLASH_TAGLINE
+      SPLASH_TAGLINE_COLOR: $SPLASH_TAGLINE_COLOR
+      SPLASH_ANIMATION: $SPLASH_ANIMATION
+      SPLASH_DURATION: $SPLASH_DURATION
+      LOGO_URL: $LOGO_URL
+      WEB_URL: $WEB_URL
+      firebase_config_android: $firebase_config_android
+      firebase_config_ios: $firebase_config_ios
+      APNS_KEY_ID: $APNS_KEY_ID
+      APPLE_TEAM_ID: $APPLE_TEAM_ID
+      APNS_AUTH_KEY_URL: $APNS_AUTH_KEY_URL
+      PKG_NAME: $PKG_NAME
+      BUNDLE_ID: $BUNDLE_ID
+      EMAIL_ID: $EMAIL_ID
+      PUSH_NOTIFY: $PUSH_NOTIFY
+      IS_CAMERA: $IS_CAMERA
+      IS_LOCATION: $IS_LOCATION
+      IS_MIC: $IS_MIC
+      IS_NOTIFICATION: $IS_NOTIFICATION
+      IS_CONTACT: $IS_CONTACT
+      IS_BIOMETRIC: $IS_BIOMETRIC
+      IS_CALENDAR: $IS_CALENDAR
+      IS_STORAGE: "true" # Always true by default
+      IS_PULLDOWN: $IS_PULLDOWN
+      IS_BOTTOMMENU: $IS_BOTTOMMENU
+      BOTTOMMENU_ITEMS: $BOTTOMMENU_ITEMS
+      BOTTOMMENU_BG_COLOR: $BOTTOMMENU_BG_COLOR
+      BOTTOMMENU_ICON_COLOR: $BOTTOMMENU_ICON_COLOR
+      BOTTOMMENU_TEXT_COLOR: $BOTTOMMENU_TEXT_COLOR
+      BOTTOMMENU_ACTIVE_TAB_COLOR: $BOTTOMMENU_ACTIVE_TAB_COLOR
+      BOTTOMMENU_ICON_POSITION: $BOTTOMMENU_ICON_POSITION
+      BOTTOMMENU_VISIBLE_ON: $BOTTOMMENU_VISIBLE_ON
+      IS_DEEPLINK: $IS_DEEPLINK
+      IS_LOAD_IND: $IS_LOAD_IND
+
+scripts:
+  - &debug_env
+    name: Debug Environment Variables
+    script: |
+      echo "*********** App Name & Version ***********"
+      echo "APP_NAME: $APP_NAME"
+      echo "ORG_NAME: $ORG_NAME"
+      echo "WEB_URL: $WEB_URL"
+      echo "VERSION_NAME: $VERSION_NAME"           
+      echo "VERSION_CODE: $VERSION_CODE" 
+      echo "PKG_NAME: $PKG_NAME"
+      echo "BUNDLE_ID: $BUNDLE_ID"
+
+      echo "*********** App Customization Configuration ***********"
+      echo "Splash screen: $IS_SPLASH"
+      echo "Pull to refresh: $IS_PULLDOWN"
+      echo "Loading indicators: $IS_LOAD_IND"
+      echo "Bottom navigation bar: $IS_BOTTOMMENU"
+      echo "Deep linking: $IS_DEEPLINK"
+
+      echo "*********** Push Notification Configuration ***********"
+      echo "PUSH_NOTIFY: $PUSH_NOTIFY"
+
+      echo "*********** Android Keystore ***********"
+      echo "KEY_STORE: $KEY_STORE"
+      echo "CM_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD"
+      echo "CM_KEY_ALIAS: $CM_KEY_ALIAS"
+      echo "CM_KEY_PASSWORD: $CM_KEY_PASSWORD"
+
+      echo "*********** IOS Keystore ***********"
+      echo "APNS_KEY_ID: $APNS_KEY_ID"
+      echo "TEAM_ID: $APPLE_TEAM_ID"
+      echo "APNS_AUTH_KEY_URL: $APNS_AUTH_KEY_URL"
+
+      echo "*********** Firebase Android config file ***********"
+      echo "firebase_config_android: $firebase_config_android"
+
+      echo "*********** Firebase IOS config file ***********"
+      echo "firebase_config_ios: $firebase_config_ios"
+
+      echo "*********** Splash Configuration ***********"
+      echo "SPLASH: $SPLASH"
+      echo "SPLASH_BG:$SPLASH_BG"
+      echo "SPLASH_BG_COLOR: $SPLASH_BG_COLOR"
+      echo "SPLASH_TAGLINE: $SPLASH_TAGLINE"
+      echo "SPLASH_TAGLINE_COLOR: $SPLASH_TAGLINE_COLOR"
+      echo "SPLASH_ANIMATION: $SPLASH_ANIMATION"
+      echo "SPLASH_DURATION: $SPLASH_DURATION"
+              
+      echo "*********** Bottom Navigation Configuration ***********"
+      echo "BOTTOMMENU_ITEMS: $BOTTOMMENU_ITEMS"
+      echo "BOTTOMMENU_BG_COLOR: $BOTTOMMENU_BG_COLOR"  
+      echo "BOTTOMMENU_ICON_COLOR: $BOTTOMMENU_ICON_COLOR"
+      echo "BOTTOMMENU_TEXT_COLOR: $BOTTOMMENU_TEXT_COLOR"
+      echo "BOTTOMMENU_ACTIVE_TAB_COLOR: $BOTTOMMENU_ACTIVE_TAB_COLOR"
+      echo "BOTTOMMENU_ICON_POSITION: $BOTTOMMENU_ICON_POSITION"
+      echo "BOTTOMMENU_VISIBLE_ON: $BOTTOMMENU_VISIBLE_ON"
+
+      echo "*********** Permissions ***********"
+      echo "IS_CAMERA: $IS_CAMERA"
+      echo "IS_LOCATION: $IS_LOCATION"
+      echo "IS_MIC: $IS_MIC"
+      echo "IS_NOTIFICATION: $IS_NOTIFICATION"
+      echo "IS_CONTACT: $IS_CONTACT"
+      echo "IS_BIOMETRIC: $IS_BIOMETRIC"
+      echo "IS_CALENDAR: $IS_CALENDAR"
+
+      echo "*********** Publish Configuration ***********"
+      echo "EMAIL_ID: $EMAIL_ID"
+
+  - &get_splash
+    name: Get splash screen image from splash image from Url
+    script: |
+      if [ "$IS_SPLASH" = "true" ]; then
+        echo "🚀 Started: Downloading splash assets"
+
+        mkdir -p assets/images/
+
+        # Download splash logo
+        echo "⬇️ Downloading splash logo from: $SPLASH"
+        wget -O assets/images/splash.png "$SPLASH"
+        if [ $? -ne 0 ]; then
+          echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+          wget --no-check-certificate -O assets/images/splash.png "$SPLASH"
+        fi
+
+        if [ ! -f assets/images/splash.png ]; then
+          echo "❌ Error: Failed to download SPLASH logo"
+          exit 1
+        fi
+
+        # Download splash background (optional)
+        if [ -n "$SPLASH_BG" ]; then
+          echo "⬇️ Downloading splash background from: $SPLASH_BG"
+          wget -O assets/images/splash_bg.png "$SPLASH_BG"
+          if [ $? -ne 0 ]; then
+            echo "⚠️ Certificate issue or download failed. Retrying with --no-check-certificate..."
+            wget --no-check-certificate -O assets/images/splash_bg.png "$SPLASH_BG"
+          fi
+
+          if [ ! -f assets/images/splash_bg.png ]; then
+            echo "❌ Error: Failed to download SPLASH background"
+            exit 1
+          fi
+        else
+          echo "ℹ️ No SPLASH_BG provided, skipping background download"
+        fi
+
+        flutter pub get
+        echo "✅ Completed: Splash assets downloaded"
+      else
+        echo "⏭️ Skipping splash asset download (IS_SPLASH != true)"
+      fi
+
+  - &change_proj_name
+    name: Change Project Name
+    script: |
+      echo "App Name: $APP_NAME"
+      # Sanitize: lowercase, remove special characters, replace spaces with underscores
+      SANITIZED_NAME=$(echo "$APP_NAME" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9 ' | tr ' ' '_')
+
+      # Extract old name from pubspec.yaml
+      OLD_NAME_LINE=$(grep '^name: ' pubspec.yaml)
+      OLD_NAME=$(echo "$OLD_NAME_LINE" | cut -d ' ' -f2)
+
+      echo "🔁 Renaming project from '$OLD_NAME' to '$SANITIZED_NAME'..."
+
+      # Update pubspec.yaml
+      sed -i '' "s/^name: .*/name: $SANITIZED_NAME/" pubspec.yaml
+
+      # Update Dart imports
+      echo "🔄 Updating Dart package imports..."
+      grep -rl "package:$OLD_NAME" lib/ | xargs sed -i '' "s/package:$OLD_NAME/package:$SANITIZED_NAME/g"
+
+      # iOS: Update CFBundleName in Info.plist
+      echo "🛠️ Updating iOS CFBundleName..."
+      plutil -replace CFBundleName -string "$APP_NAME" ios/Runner/Info.plist
+
+      # Clean and get packages
+      flutter clean
+      flutter pub get
+
+      echo "✅ Project renamed to '$SANITIZED_NAME'"
+
+      echo "🚀 iOS CFBundleName set to '$APP_NAME'"
+
+  - &get_logo
+    name: Get logo image from logoUrl
+    script: |
+      echo "🚀 Started: Downloading logo from $LOGO_URL"
+
+      mkdir -p assets/images/
+
+      # Try downloading with SSL certificate check first (silent test)
+      wget --spider --quiet "$LOGO_URL"
+      if [ $? -ne 0 ]; then
+        echo "⚠️ SSL verification failed. Retrying with --no-check-certificate..."
+        WGET_OPTS="--no-check-certificate"
+      else
+        WGET_OPTS=""
+      fi
+
+      # Attempt actual download
+      wget $WGET_OPTS -O assets/images/logo.png "$LOGO_URL"
+
+      # Check if the file was successfully downloaded
+      if [ ! -f assets/images/logo.png ]; then
+        echo "❌ Error: Failed to download logo from $LOGO_URL"
+        exit 1
+      fi
+
+      flutter pub get
+      echo "✅ Completed: Logo downloaded"
+
+  - &set_launcher_icons
+    name: Generate Launcher Icons
+    script: |
+      echo "🚀 Generating launcher icons"
+
+      echo "🔢 VERSION_NAME: $VERSION_NAME"
+      echo "🔢 VERSION_CODE: $VERSION_CODE"
+      # Default values
+      VERSION_NAME="${VERSION_NAME:-1.0.0}"
+      VERSION_CODE="${VERSION_CODE:-100}"
+
+      # Check if VERSION_NAME is empty or not set
+      if [ -z "$VERSION_NAME" ]; then
+        VERSION_NAME=$DEFAULT_VERSION_NAME
+        echo "🔢 Setting DEFAULT_VERSION_NAME"
+      fi
+
+      # Check if VERSION_CODE is empty or not set
+      if [ -z "$VERSION_CODE" ]; then
+        VERSION_CODE=$DEFAULT_VERSION_CODE
+        echo "🔢 Setting DEFAULT_VERSION_CODE"
+      fi
+
+      echo "🔢 VERSION_NAME: $VERSION_NAME"
+      echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+      echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+      # Replace or add version line in pubspec.yaml
+      if grep -q "^version: " pubspec.yaml; then
+        sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+      else
+        echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+      fi
+
+      flutter pub get
+
+      # Use updated command (deprecates `:main`)
+      flutter pub run flutter_launcher_icons
+
+      echo "✅ Launcher icons generated successfully"
+
+  - &change_app_name
+    name: Change app name
+    script: |
+      echo "🚀 Changing app name to: $APP_NAME"
+
+      flutter pub run rename setAppName --value "$APP_NAME"
+      echo "🔢 VERSION_NAME: $VERSION_NAME"
+      echo "🔢 VERSION_CODE: $VERSION_CODE"
+      # Default values
+      VERSION_NAME="${VERSION_NAME:-1.0.0}"
+      VERSION_CODE="${VERSION_CODE:-100}"
+
+      # Check if VERSION_NAME is empty or not set
+      if [ -z "$VERSION_NAME" ]; then
+        VERSION_NAME=$DEFAULT_VERSION_NAME
+        echo "🔢 Setting DEFAULT_VERSION_NAME"
+      fi
+
+      # Check if VERSION_CODE is empty or not set
+      if [ -z "$VERSION_CODE" ]; then
+        VERSION_CODE=$DEFAULT_VERSION_CODE
+        echo "🔢 Setting DEFAULT_VERSION_CODE"
+      fi
+
+      echo "🔢 VERSION_NAME: $VERSION_NAME"
+      echo "🔢 VERSION_CODE: $VERSION_CODE"
+
+      echo "🔧 Ensuring valid version in pubspec.yaml: $VERSION_NAME+$VERSION_CODE"
+      # Replace or add version line in pubspec.yaml
+      if grep -q "^version: " pubspec.yaml; then
+        sed -i.bak -E "s/^version: .*/version: $VERSION_NAME+$VERSION_CODE/" pubspec.yaml
+      else
+        echo "version: $VERSION_NAME+$VERSION_CODE" >> pubspec.yaml
+      fi
+
+      flutter pub get
+
+      echo "✅ App name changed and version set successfully"
+
+  - &setup_flutter
+    name: Setup Flutter Environment
+    script: |
+      flutter clean
+      flutter pub get
+
+  - &download_assets
+    name: Download App Assets
+    script: |
+      mkdir -p assets/images
+
+      # Download logo
+      if [ -n "$LOGO_URL" ]; then
+        echo "⬇️ Downloading logo from: $LOGO_URL"
+        curl -o assets/images/logo.png "$LOGO_URL"
+      fi
+
+      # Download splash assets if enabled
+      if [ "$IS_SPLASH" = "true" ]; then
+        echo "⬇️ Downloading splash image from: $SPLASH"
+        curl -o assets/images/splash.png "$SPLASH"
+        
+        if [ -n "$SPLASH_BG" ]; then
+          echo "⬇️ Downloading splash background from: $SPLASH_BG"
+          curl -o assets/images/splash_bg.png "$SPLASH_BG"
+        fi
+      fi
+
+  - &setup_firebase
+    name: Setup Firebase Configuration
+    script: |
+      if [ "$PUSH_NOTIFY" = "true" ]; then
+        # Download Android config
+        if [ -n "$firebase_config_android" ]; then
+          echo "⬇️ Downloading Firebase Android config"
+          curl -o android/app/google-services.json "$firebase_config_android"
+        fi
+        
+        # Download iOS config
+        if [ -n "$firebase_config_ios" ]; then
+          echo "⬇️ Downloading Firebase iOS config"
+          curl -o ios/Runner/GoogleService-Info.plist "$firebase_config_ios"
+        fi
+      fi
+
+  - &setup_android_signing
+    name: Setup Android Signing
+    script: |
+      if [ -n "$KEY_STORE" ]; then
+        echo "⬇️ Downloading Android keystore"
+        curl -o android/app/keystore.jks "$KEY_STORE"
+        
+        # Create key.properties
+        echo "storePassword=$CM_KEYSTORE_PASSWORD" > android/key.properties
+        echo "keyPassword=$CM_KEY_PASSWORD" >> android/key.properties
+        echo "keyAlias=$CM_KEY_ALIAS" >> android/key.properties
+        echo "storeFile=keystore.jks" >> android/key.properties
+      fi
+
+  - &setup_ios_signing
+    name: Setup iOS Signing
+    script: |
+      if [ -n "$CERT_URL" ] && [ -n "$PROFILE_URL" ]; then
+        echo "⬇️ Downloading iOS certificates and provisioning profiles"
+        curl -o ios/certs.p12 "$CERT_URL"
+        curl -o ios/profile.mobileprovision "$PROFILE_URL"
+        
+        # Setup iOS certificates
+        keychain initialize
+        keychain add-certificates \
+          --certificate ios/certs.p12 \
+          --certificate-password "$CERT_PASSWORD"
+          
+        # Install provisioning profile
+        mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+        cp ios/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+      fi
+
+  - &build_android_debug
+    name: Build Android Debug APK
+    script: |
+      flutter build apk --debug \
+        --build-name=$VERSION_NAME \
+        --build-number=$VERSION_CODE \
+        --dart-define=APP_NAME="$APP_NAME" \
+        --dart-define=ORG_NAME="$ORG_NAME" \
+        --dart-define=WEB_URL="$WEB_URL" \
+        --dart-define=LOGO_URL="$LOGO_URL" \
+        --dart-define=IS_SPLASH="$IS_SPLASH" \
+        --dart-define=SPLASH="$SPLASH" \
+        --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+        --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+        --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+        --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+        --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+        --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+        --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+        --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+        --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+        --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+        --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+
+  - &build_android_release
+    name: Build Android Release APK/AAB
+    script: |
+      flutter build apk --release \
+        --build-name=$VERSION_NAME \
+        --build-number=$VERSION_CODE \
+        --dart-define=APP_NAME="$APP_NAME" \
+        --dart-define=ORG_NAME="$ORG_NAME" \
+        --dart-define=WEB_URL="$WEB_URL" \
+        --dart-define=LOGO_URL="$LOGO_URL" \
+        --dart-define=IS_SPLASH="$IS_SPLASH" \
+        --dart-define=SPLASH="$SPLASH" \
+        --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+        --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+        --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+        --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+        --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+        --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+        --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+        --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+        --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+        --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+        --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+
+      flutter build appbundle --release \
+        --build-name=$VERSION_NAME \
+        --build-number=$VERSION_CODE \
+        --dart-define=APP_NAME="$APP_NAME" \
+        --dart-define=ORG_NAME="$ORG_NAME" \
+        --dart-define=WEB_URL="$WEB_URL" \
+        --dart-define=LOGO_URL="$LOGO_URL" \
+        --dart-define=IS_SPLASH="$IS_SPLASH" \
+        --dart-define=SPLASH="$SPLASH" \
+        --dart-define=SPLASH_BG_COLOR="$SPLASH_BG_COLOR" \
+        --dart-define=SPLASH_TAGLINE="$SPLASH_TAGLINE" \
+        --dart-define=SPLASH_TAGLINE_COLOR="$SPLASH_TAGLINE_COLOR" \
+        --dart-define=SPLASH_ANIMATION="$SPLASH_ANIMATION" \
+        --dart-define=SPLASH_DURATION="$SPLASH_DURATION" \
+        --dart-define=IS_PULLDOWN="$IS_PULLDOWN" \
+        --dart-define=IS_BOTTOMMENU="$IS_BOTTOMMENU" \
+        --dart-define=BOTTOMMENU_ITEMS='$BOTTOMMENU_ITEMS' \
+        --dart-define=PUSH_NOTIFY="$PUSH_NOTIFY" \
+        --dart-define=IS_DEEPLINK="$IS_DEEPLINK" \
+        --dart-define=IS_LOAD_IND="$IS_LOAD_IND"
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+      - build/app/outputs/bundle/release/app-release.aab
+    publishing:
+      email:
+        recipients:
+          - $EMAIL_ID
+        notify:
+          success: true
+          failure: true
+
+artifacts:
+  - &android_debug build/app/outputs/flutter-apk/app-debug.apk
+  - &android_release build/app/outputs/flutter-apk/app-release.apk
+  - &android_bundle build/app/outputs/bundle/release/app-release.aab
+  - &ios_app build/ios/ipa/*.ipa
+  - &build_logs flutter_build.log
+
+email_release: &email_release
+  email:
+    recipients:
+      - $EMAIL_ID
+    notify:
+      success: true
+      failure: true
